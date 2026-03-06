@@ -2,27 +2,23 @@
 // the agent reports a model id. This includes custom models.json entries.
 
 import { loadConfig } from "../config/config.js";
-import { resolveOpenClawAgentDir } from "./agent-paths.js";
-import { ensureOpenClawModelsJson } from "./models-config.js";
-
-type ModelEntry = { id: string; contextWindow?: number };
+import { loadResolvedModelView } from "./resolved-model-view.js";
 
 const MODEL_CACHE = new Map<string, number>();
 const loadPromise = (async () => {
   try {
-    const { discoverAuthStorage, discoverModels } = await import("./pi-model-discovery.js");
     const cfg = loadConfig();
-    await ensureOpenClawModelsJson(cfg);
-    const agentDir = resolveOpenClawAgentDir();
-    const authStorage = discoverAuthStorage(agentDir);
-    const modelRegistry = discoverModels(authStorage, agentDir);
-    const models = modelRegistry.getAll() as ModelEntry[];
-    for (const m of models) {
-      if (!m?.id) {
+    const { visibleEntries } = await loadResolvedModelView({
+      cfg,
+      includeAllCatalog: true,
+    });
+    for (const entry of visibleEntries) {
+      if (!entry?.model) {
         continue;
       }
-      if (typeof m.contextWindow === "number" && m.contextWindow > 0) {
-        MODEL_CACHE.set(m.id, m.contextWindow);
+      if (typeof entry.contextWindow === "number" && entry.contextWindow > 0) {
+        MODEL_CACHE.set(entry.key, entry.contextWindow);
+        MODEL_CACHE.set(entry.model, entry.contextWindow);
       }
     }
   } catch {
