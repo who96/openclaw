@@ -2,6 +2,17 @@ import { describe, expect, it, vi } from "vitest";
 
 const loadSessionStoreMock = vi.fn();
 const updateSessionStoreMock = vi.fn();
+const loadConfigMock = vi.hoisted(() =>
+  vi.fn(() => ({
+    session: { mainKey: "main", scope: "per-sender" },
+    agents: {
+      defaults: {
+        model: { primary: "anthropic/claude-opus-4-5" },
+        models: {},
+      },
+    },
+  })),
+);
 
 vi.mock("../config/sessions.js", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../config/sessions.js")>();
@@ -26,15 +37,7 @@ vi.mock("../config/config.js", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../config/config.js")>();
   return {
     ...actual,
-    loadConfig: () => ({
-      session: { mainKey: "main", scope: "per-sender" },
-      agents: {
-        defaults: {
-          model: { primary: "anthropic/claude-opus-4-5" },
-          models: {},
-        },
-      },
-    }),
+    loadConfig: () => loadConfigMock(),
   };
 });
 
@@ -273,5 +276,49 @@ describe("session_status tool", () => {
     expect(saved.providerOverride).toBeUndefined();
     expect(saved.modelOverride).toBeUndefined();
     expect(saved.authProfileOverride).toBeUndefined();
+  });
+
+  it("accepts config-only model overrides that are missing from the catalog", async () => {
+    loadSessionStoreMock.mockReset();
+    updateSessionStoreMock.mockReset();
+    loadConfigMock.mockReturnValue({
+      session: { mainKey: "main", scope: "per-sender" },
+      agents: {
+        defaults: {
+          model: { primary: "anthropic/claude-opus-4-5" },
+          models: {
+            "openai-codex/gpt-5.4": {},
+          },
+        },
+      },
+    });
+    loadSessionStoreMock.mockReturnValue({
+      main: {
+        sessionId: "s1",
+        updatedAt: 10,
+      },
+    });
+
+    const tool = createOpenClawTools({ agentSessionKey: "main" }).find(
+      (candidate) => candidate.name === "session_status",
+    );
+    expect(tool).toBeDefined();
+    if (!tool) {
+      throw new Error("missing session_status tool");
+    }
+
+    const result = await tool.execute("call7", { model: "openai-codex/gpt-5.4" });
+    expect(updateSessionStoreMock).toHaveBeenCalled();
+    const [, savedStore] = updateSessionStoreMock.mock.calls.at(-1) as [
+      string,
+      Record<string, unknown>,
+    ];
+    const saved = savedStore.main as Record<string, unknown>;
+    expect(saved.providerOverride).toBe("openai-codex");
+    expect(saved.modelOverride).toBe("gpt-5.4");
+
+    const details = result.details as { ok?: boolean; statusText?: string };
+    expect(details.ok).toBe(true);
+    expect(details.statusText).toContain("openai-codex/gpt-5.4");
   });
 });

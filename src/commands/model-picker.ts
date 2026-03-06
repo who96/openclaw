@@ -5,12 +5,12 @@ import { DEFAULT_MODEL, DEFAULT_PROVIDER } from "../agents/defaults.js";
 import { getCustomProviderApiKey, resolveEnvApiKey } from "../agents/model-auth.js";
 import { loadModelCatalog } from "../agents/model-catalog.js";
 import {
-  buildAllowedModelSet,
   buildModelAliasIndex,
   modelKey,
   normalizeProviderId,
   resolveConfiguredModelRef,
 } from "../agents/model-selection.js";
+import { loadResolvedModelView } from "../agents/resolved-model-view.js";
 import { formatTokenK } from "./models/shared.js";
 import { OPENAI_CODEX_DEFAULT_MODEL } from "./openai-codex-model-default.js";
 
@@ -122,36 +122,21 @@ export async function promptDefaultModel(
   const resolvedKey = modelKey(resolved.provider, resolved.model);
   const configuredKey = configuredRaw ? resolvedKey : "";
 
-  const catalog = await loadModelCatalog({ config: cfg, useCache: false });
-  if (catalog.length === 0) {
-    return promptManualModel({
-      prompter: params.prompter,
-      allowBlank: allowKeep,
-      initialValue: configuredRaw || resolvedKey || undefined,
-    });
-  }
-
-  const aliasIndex = buildModelAliasIndex({
+  const view = await loadResolvedModelView({
     cfg,
-    defaultProvider: DEFAULT_PROVIDER,
+    includeAllCatalog: ignoreAllowlist,
+    useCache: false,
   });
-  let models = catalog;
-  if (!ignoreAllowlist) {
-    const { allowedCatalog } = buildAllowedModelSet({
-      cfg,
-      catalog,
-      defaultProvider: DEFAULT_PROVIDER,
-    });
-    models = allowedCatalog.length > 0 ? allowedCatalog : catalog;
-  }
-
-  if (models.length === 0) {
+  if (view.visibleEntries.length === 0) {
     return promptManualModel({
       prompter: params.prompter,
       allowBlank: allowKeep,
       initialValue: configuredRaw || resolvedKey || undefined,
     });
   }
+
+  const aliasIndex = view.aliasIndex;
+  let models = view.visibleEntries;
 
   const providers = Array.from(new Set(models.map((entry) => entry.provider))).toSorted((a, b) =>
     a.localeCompare(b),
@@ -220,6 +205,7 @@ export async function promptDefaultModel(
     name?: string;
     contextWindow?: number;
     reasoning?: boolean;
+    inCatalog?: boolean;
   }) => {
     const key = modelKey(entry.provider, entry.id);
     if (seen.has(key)) {
@@ -239,6 +225,9 @@ export async function promptDefaultModel(
     if (entry.reasoning) {
       hints.push("reasoning");
     }
+    if (entry.inCatalog === false) {
+      hints.push("not in catalog");
+    }
     const aliases = aliasIndex.byKey.get(key);
     if (aliases?.length) {
       hints.push(`alias: ${aliases.join(", ")}`);
@@ -255,7 +244,14 @@ export async function promptDefaultModel(
   };
 
   for (const entry of models) {
-    addModelOption(entry);
+    addModelOption({
+      provider: entry.provider,
+      id: entry.model,
+      name: entry.name,
+      contextWindow: entry.contextWindow,
+      reasoning: entry.reasoning,
+      inCatalog: entry.inCatalog,
+    });
   }
 
   if (configuredKey && !seen.has(configuredKey)) {
@@ -275,7 +271,7 @@ export async function promptDefaultModel(
   ) {
     const firstModel = models[0];
     if (firstModel) {
-      initialValue = modelKey(firstModel.provider, firstModel.id);
+      initialValue = modelKey(firstModel.provider, firstModel.model);
     }
   }
 

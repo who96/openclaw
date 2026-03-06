@@ -3,15 +3,14 @@ import type { ThinkLevel } from "./directives.js";
 import { clearSessionAuthProfileOverride } from "../../agents/auth-profiles/session-override.js";
 import { lookupContextTokens } from "../../agents/context.js";
 import { DEFAULT_CONTEXT_TOKENS } from "../../agents/defaults.js";
-import { loadModelCatalog } from "../../agents/model-catalog.js";
 import {
-  buildAllowedModelSet,
   type ModelAliasIndex,
   modelKey,
   normalizeProviderId,
   resolveModelRefFromString,
   resolveThinkingDefault,
 } from "../../agents/model-selection.js";
+import { loadResolvedModelView } from "../../agents/resolved-model-view.js";
 import { type SessionEntry, updateSessionStore } from "../../config/sessions.js";
 import { applyModelOverrideToSessionEntry } from "../../sessions/model-overrides.js";
 import { resolveThreadParentSessionKey } from "../../sessions/session-key-utils.js";
@@ -23,7 +22,7 @@ export type ModelDirectiveSelection = {
   alias?: string;
 };
 
-type ModelCatalog = Awaited<ReturnType<typeof loadModelCatalog>>;
+type ModelCatalog = Awaited<ReturnType<typeof loadResolvedModelView>>["catalog"];
 
 type ModelSelectionState = {
   provider: string;
@@ -306,15 +305,10 @@ export async function createModelSelectionState(params: {
   let resetModelOverride = false;
 
   if (needsModelCatalog) {
-    modelCatalog = await loadModelCatalog({ config: cfg });
-    const allowed = buildAllowedModelSet({
-      cfg,
-      catalog: modelCatalog,
-      defaultProvider,
-      defaultModel,
-    });
-    allowedModelCatalog = allowed.allowedCatalog;
-    allowedModelKeys = allowed.allowedKeys;
+    const view = await loadResolvedModelView({ cfg });
+    modelCatalog = view.catalog;
+    allowedModelCatalog = view.visibleCatalog;
+    allowedModelKeys = view.visibleKeys;
   }
 
   if (sessionEntry && sessionStore && sessionKey && hasStoredOverride) {
@@ -383,7 +377,8 @@ export async function createModelSelectionState(params: {
     }
     let catalogForThinking = modelCatalog ?? allowedModelCatalog;
     if (!catalogForThinking || catalogForThinking.length === 0) {
-      modelCatalog = await loadModelCatalog({ config: cfg });
+      const view = await loadResolvedModelView({ cfg });
+      modelCatalog = view.catalog;
       catalogForThinking = modelCatalog;
     }
     const resolved = resolveThinkingDefault({

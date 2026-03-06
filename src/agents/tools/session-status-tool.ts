@@ -2,6 +2,7 @@ import { Type } from "@sinclair/typebox";
 import type { OpenClawConfig } from "../../config/config.js";
 import type { AnyAgentTool } from "./common.js";
 import { normalizeGroupActivation } from "../../auto-reply/group-activation.js";
+import { resolveModelDirectiveSelection } from "../../auto-reply/reply/model-selection.js";
 import { getFollowupQueueDepth, resolveQueueSettings } from "../../auto-reply/reply/queue.js";
 import { buildStatusMessage } from "../../auto-reply/status.js";
 import { loadConfig } from "../../config/config.js";
@@ -31,15 +32,8 @@ import {
 } from "../auth-profiles.js";
 import { formatUserTime, resolveUserTimeFormat, resolveUserTimezone } from "../date-time.js";
 import { getCustomProviderApiKey, resolveEnvApiKey } from "../model-auth.js";
-import { loadModelCatalog } from "../model-catalog.js";
-import {
-  buildAllowedModelSet,
-  buildModelAliasIndex,
-  modelKey,
-  normalizeProviderId,
-  resolveDefaultModelForAgent,
-  resolveModelRefFromString,
-} from "../model-selection.js";
+import { normalizeProviderId, resolveDefaultModelForAgent } from "../model-selection.js";
+import { loadResolvedModelView } from "../resolved-model-view.js";
 import { readStringParam } from "./common.js";
 import {
   shouldResolveSessionIdInput,
@@ -214,36 +208,27 @@ async function resolveModelOverride(params: {
   const currentProvider = params.sessionEntry?.providerOverride?.trim() || configDefault.provider;
   const currentModel = params.sessionEntry?.modelOverride?.trim() || configDefault.model;
 
-  const aliasIndex = buildModelAliasIndex({
-    cfg: params.cfg,
-    defaultProvider: currentProvider,
-  });
-  const catalog = await loadModelCatalog({ config: params.cfg });
-  const allowed = buildAllowedModelSet({
-    cfg: params.cfg,
-    catalog,
-    defaultProvider: currentProvider,
-    defaultModel: currentModel,
-  });
-
-  const resolved = resolveModelRefFromString({
+  const view = await loadResolvedModelView({ cfg: params.cfg });
+  const resolved = resolveModelDirectiveSelection({
     raw,
     defaultProvider: currentProvider,
-    aliasIndex,
+    defaultModel: currentModel,
+    aliasIndex: view.aliasIndex,
+    allowedModelKeys: view.visibleKeys,
   });
-  if (!resolved) {
+  if (resolved.error) {
+    throw new Error(resolved.error);
+  }
+  if (!resolved.selection) {
     throw new Error(`Unrecognized model "${raw}".`);
   }
-  const key = modelKey(resolved.ref.provider, resolved.ref.model);
-  if (allowed.allowedKeys.size > 0 && !allowed.allowedKeys.has(key)) {
-    throw new Error(`Model "${key}" is not allowed.`);
-  }
   const isDefault =
-    resolved.ref.provider === configDefault.provider && resolved.ref.model === configDefault.model;
+    resolved.selection.provider === configDefault.provider &&
+    resolved.selection.model === configDefault.model;
   return {
     kind: "set",
-    provider: resolved.ref.provider,
-    model: resolved.ref.model,
+    provider: resolved.selection.provider,
+    model: resolved.selection.model,
     isDefault,
   };
 }

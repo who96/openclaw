@@ -1,15 +1,8 @@
 import type { OpenClawConfig } from "../../config/config.js";
 import type { ReplyPayload } from "../types.js";
 import type { CommandHandler } from "./commands-types.js";
-import { DEFAULT_MODEL, DEFAULT_PROVIDER } from "../../agents/defaults.js";
-import { loadModelCatalog } from "../../agents/model-catalog.js";
-import {
-  buildAllowedModelSet,
-  buildModelAliasIndex,
-  normalizeProviderId,
-  resolveConfiguredModelRef,
-  resolveModelRefFromString,
-} from "../../agents/model-selection.js";
+import { normalizeProviderId } from "../../agents/model-selection.js";
+import { loadResolvedModelView } from "../../agents/resolved-model-view.js";
 import {
   buildModelsKeyboard,
   buildProviderKeyboard,
@@ -32,24 +25,7 @@ export type ModelsProviderData = {
  * Exported for reuse by callback handlers.
  */
 export async function buildModelsProviderData(cfg: OpenClawConfig): Promise<ModelsProviderData> {
-  const resolvedDefault = resolveConfiguredModelRef({
-    cfg,
-    defaultProvider: DEFAULT_PROVIDER,
-    defaultModel: DEFAULT_MODEL,
-  });
-
-  const catalog = await loadModelCatalog({ config: cfg });
-  const allowed = buildAllowedModelSet({
-    cfg,
-    catalog,
-    defaultProvider: resolvedDefault.provider,
-    defaultModel: resolvedDefault.model,
-  });
-
-  const aliasIndex = buildModelAliasIndex({
-    cfg,
-    defaultProvider: resolvedDefault.provider,
-  });
+  const view = await loadResolvedModelView({ cfg });
 
   const byProvider = new Map<string, Set<string>>();
   const add = (p: string, m: string) => {
@@ -58,62 +34,13 @@ export async function buildModelsProviderData(cfg: OpenClawConfig): Promise<Mode
     set.add(m);
     byProvider.set(key, set);
   };
-
-  const addRawModelRef = (raw?: string) => {
-    const trimmed = raw?.trim();
-    if (!trimmed) {
-      return;
-    }
-    const resolved = resolveModelRefFromString({
-      raw: trimmed,
-      defaultProvider: resolvedDefault.provider,
-      aliasIndex,
-    });
-    if (!resolved) {
-      return;
-    }
-    add(resolved.ref.provider, resolved.ref.model);
-  };
-
-  const addModelConfigEntries = () => {
-    const modelConfig = cfg.agents?.defaults?.model;
-    if (typeof modelConfig === "string") {
-      addRawModelRef(modelConfig);
-    } else if (modelConfig && typeof modelConfig === "object") {
-      addRawModelRef(modelConfig.primary);
-      for (const fallback of modelConfig.fallbacks ?? []) {
-        addRawModelRef(fallback);
-      }
-    }
-
-    const imageConfig = cfg.agents?.defaults?.imageModel;
-    if (typeof imageConfig === "string") {
-      addRawModelRef(imageConfig);
-    } else if (imageConfig && typeof imageConfig === "object") {
-      addRawModelRef(imageConfig.primary);
-      for (const fallback of imageConfig.fallbacks ?? []) {
-        addRawModelRef(fallback);
-      }
-    }
-  };
-
-  for (const entry of allowed.allowedCatalog) {
-    add(entry.provider, entry.id);
+  for (const entry of view.visibleEntries) {
+    add(entry.provider, entry.model);
   }
-
-  // Include config-only allowlist keys that aren't in the curated catalog.
-  for (const raw of Object.keys(cfg.agents?.defaults?.models ?? {})) {
-    addRawModelRef(raw);
-  }
-
-  // Ensure configured defaults/fallbacks/image models show up even when the
-  // curated catalog doesn't know about them (custom providers, dev builds, etc.).
-  add(resolvedDefault.provider, resolvedDefault.model);
-  addModelConfigEntries();
 
   const providers = [...byProvider.keys()].toSorted();
 
-  return { byProvider, providers, resolvedDefault };
+  return { byProvider, providers, resolvedDefault: view.resolvedDefault };
 }
 
 function formatProviderLine(params: { provider: string; count: number }): string {

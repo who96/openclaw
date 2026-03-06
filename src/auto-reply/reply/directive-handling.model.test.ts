@@ -86,6 +86,37 @@ describe("/model chat UX", () => {
     });
     expect(resolved.errorText).toBeUndefined();
   });
+
+  it("shows config-only models that are missing from the catalog in /model status", async () => {
+    const directives = parseInlineDirectives("/model status");
+    const cfg = {
+      commands: { text: true },
+      agents: {
+        defaults: {
+          model: { primary: "anthropic/claude-opus-4-5" },
+          models: {
+            "openai-codex/gpt-5.4": {},
+          },
+        },
+      },
+    } as unknown as OpenClawConfig;
+
+    const reply = await maybeHandleModelDirectiveInfo({
+      directives,
+      cfg,
+      agentDir: "/tmp/agent",
+      activeAgentId: "main",
+      provider: "anthropic",
+      model: "claude-opus-4-5",
+      defaultProvider: "anthropic",
+      defaultModel: "claude-opus-4-5",
+      aliasIndex: baseAliasIndex(),
+      allowedModelCatalog: [],
+      resetModelOverride: false,
+    });
+
+    expect(reply?.text).toContain("openai-codex/gpt-5.4");
+  });
 });
 
 describe("handleDirectiveOnly model persist behavior (fixes #1435)", () => {

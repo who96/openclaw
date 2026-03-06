@@ -18,12 +18,11 @@ import {
 } from "../../agents/auth-profiles.js";
 import { resolveEnvApiKey } from "../../agents/model-auth.js";
 import {
-  buildModelAliasIndex,
   parseModelRef,
   resolveConfiguredModelRef,
   resolveDefaultModelForAgent,
-  resolveModelRefFromString,
 } from "../../agents/model-selection.js";
+import { resolveConfiguredEntries } from "../../agents/resolved-model-view.js";
 import { formatCliCommand } from "../../cli/command-format.js";
 import { withProgressTotals } from "../../cli/progress.js";
 import { CONFIG_PATH, loadConfig } from "../../config/config.js";
@@ -218,25 +217,8 @@ export async function modelsStatusCommand(
     throw new Error("--probe-max-tokens must be > 0.");
   }
 
-  const aliasIndex = buildModelAliasIndex({ cfg, defaultProvider: DEFAULT_PROVIDER });
-  const rawCandidates = [
-    rawModel || resolvedLabel,
-    ...fallbacks,
-    imageModel,
-    ...imageFallbacks,
-    ...allowed,
-  ].filter(Boolean);
-  const resolvedCandidates = rawCandidates
-    .map(
-      (raw) =>
-        resolveModelRefFromString({
-          raw: String(raw ?? ""),
-          defaultProvider: DEFAULT_PROVIDER,
-          aliasIndex,
-        })?.ref,
-    )
-    .filter((ref): ref is { provider: string; model: string } => Boolean(ref));
-  const modelCandidates = resolvedCandidates.map((ref) => `${ref.provider}/${ref.model}`);
+  const configuredCandidates = resolveConfiguredEntries(cfg).entries;
+  const modelCandidates = configuredCandidates.map((entry) => entry.key);
 
   let probeSummary: AuthProbeSummary | undefined;
   if (opts.probe) {

@@ -68,6 +68,44 @@ describe("promptDefaultModel", () => {
       true,
     );
   });
+
+  it("includes config-only allowlist entries that are missing from the catalog", async () => {
+    loadModelCatalog.mockResolvedValue([
+      {
+        provider: "anthropic",
+        id: "claude-opus-4-5",
+        name: "Claude Opus 4.5",
+      },
+    ]);
+
+    const select = vi.fn(async (params) => {
+      const matching = params.options.find(
+        (option: { value: string }) => option.value === "openai-codex/gpt-5.4",
+      );
+      expect(matching).toBeTruthy();
+      return matching?.value ?? "";
+    });
+    const prompter = makePrompter({ select });
+    const config = {
+      agents: {
+        defaults: {
+          model: { primary: "anthropic/claude-opus-4-5" },
+          models: {
+            "openai-codex/gpt-5.4": {},
+          },
+        },
+      },
+    } as OpenClawConfig;
+
+    const result = await promptDefaultModel({
+      config,
+      prompter,
+      allowKeep: false,
+      includeManual: false,
+    });
+
+    expect(result.model).toBe("openai-codex/gpt-5.4");
+  });
 });
 
 describe("promptModelAllowlist", () => {
